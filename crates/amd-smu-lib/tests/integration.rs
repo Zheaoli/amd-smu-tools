@@ -11,7 +11,8 @@ fn create_mock_sysfs() -> TempDir {
     fs::write(path.join("version"), "SMU v46.54.0\n").unwrap();
     fs::write(path.join("drv_version"), "0.1.7\n").unwrap();
     fs::write(path.join("codename"), "12\n").unwrap(); // Vermeer
-    fs::write(path.join("pm_table_version"), "0x240903\n").unwrap();
+    // PM table version is stored as binary little-endian u32
+    fs::write(path.join("pm_table_version"), &0x240903u32.to_le_bytes()).unwrap();
     fs::write(path.join("pm_table_size"), "6832\n").unwrap();
 
     // Create mock PM table
@@ -23,6 +24,7 @@ fn create_mock_sysfs() -> TempDir {
 }
 
 fn create_mock_pm_table() -> Vec<u8> {
+    // PM table for version 0x240903 (Matisse/Vermeer - Zen 2/3)
     let mut data = vec![0u8; 6832];
 
     let write_f32 = |data: &mut [u8], offset: usize, value: f32| {
@@ -30,7 +32,7 @@ fn create_mock_pm_table() -> Vec<u8> {
         data[offset..offset + 4].copy_from_slice(&bytes);
     };
 
-    // Limits and values (correct offsets from pm_table_0x240903 struct)
+    // Limits and values (offsets from pm_table_0x240903 struct)
     write_f32(&mut data, 0x000, 142.0);  // PPT_LIMIT
     write_f32(&mut data, 0x004, 89.5);   // PPT_VALUE
     write_f32(&mut data, 0x008, 95.0);   // TDC_LIMIT
@@ -44,13 +46,13 @@ fn create_mock_pm_table() -> Vec<u8> {
     write_f32(&mut data, 0x0A0, 1.35);   // CPU_TELEMETRY_VOLTAGE
     write_f32(&mut data, 0x0B4, 1.10);   // SOC_TELEMETRY_VOLTAGE
     write_f32(&mut data, 0x0C0, 1800.0); // FCLK_FREQ
-    write_f32(&mut data, 0x0CC, 1800.0); // MEMCLK_FREQ (was 0x0C8, now correct)
-    write_f32(&mut data, 0x1CC, 42.1);   // SOC_TEMP (was 0x0A8, now correct)
+    write_f32(&mut data, 0x0CC, 1800.0); // MEMCLK_FREQ
+    write_f32(&mut data, 0x1CC, 42.1);   // SOC_TEMP
 
-    // Per-core data (8 cores) - correct offsets
+    // Per-core data (8 cores)
     for i in 0..8 {
         write_f32(&mut data, 0x24C + i * 4, 8.0 + i as f32 * 0.5);   // CORE_POWER
-        write_f32(&mut data, 0x28C + i * 4, 60.0 + i as f32 * 0.5);  // CORE_TEMP (was 0x2C0)
+        write_f32(&mut data, 0x28C + i * 4, 60.0 + i as f32 * 0.5);  // CORE_TEMP
         write_f32(&mut data, 0x2EC + i * 4, 4500.0 + i as f32 * 50.0); // CORE_FREQ
         write_f32(&mut data, 0x30C + i * 4, 4400.0 + i as f32 * 50.0); // CORE_FREQEFF
         write_f32(&mut data, 0x32C + i * 4, 90.0 + i as f32);        // CORE_C0

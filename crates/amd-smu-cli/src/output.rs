@@ -27,9 +27,25 @@ pub fn format_text(table: &PmTable, smu_version: &str, opts: &OutputOptions) -> 
             table.tctl, table.thm_limit));
         out.push_str(&format!("  SoC:            {:+.1}°C\n", table.soc_temp));
 
-        for (i, temp) in table.core_temps.iter().enumerate() {
-            if *temp > 0.0 {
-                out.push_str(&format!("  Core {:2}:        {:+.1}°C\n", i, temp));
+        // Group cores by CCD (8 cores per CCD)
+        let cores_per_ccd = 8;
+        let total_cores = table.core_temps.len();
+        let num_ccds = (total_cores + cores_per_ccd - 1) / cores_per_ccd;
+
+        for ccd in 0..num_ccds {
+            let start = ccd * cores_per_ccd;
+            let end = (start + cores_per_ccd).min(total_cores);
+            let ccd_temps: Vec<_> = table.core_temps[start..end].iter()
+                .filter(|t| **t > 0.0)
+                .collect();
+
+            if !ccd_temps.is_empty() {
+                out.push_str(&format!("  CCD{}:\n", ccd));
+                for (i, temp) in table.core_temps[start..end].iter().enumerate() {
+                    if *temp > 0.0 {
+                        out.push_str(&format!("    Core {:2}:      {:+.1}°C\n", start + i, temp));
+                    }
+                }
             }
         }
         out.push('\n');

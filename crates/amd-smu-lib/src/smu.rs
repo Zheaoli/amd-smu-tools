@@ -45,13 +45,19 @@ impl SmuReader {
 
     /// Get the PM table version
     pub fn pm_table_version(&self) -> Result<u32> {
-        let ver_str = self.read_string("pm_table_version")?;
-        // Handle both decimal and hex formats
-        let trimmed = ver_str.trim();
-        if trimmed.starts_with("0x") || trimmed.starts_with("0X") {
-            Ok(u32::from_str_radix(&trimmed[2..], 16).unwrap_or(0))
+        let data = self.read_binary("pm_table_version")?;
+        // PM table version is a little-endian u32
+        if data.len() >= 4 {
+            Ok(u32::from_le_bytes([data[0], data[1], data[2], data[3]]))
         } else {
-            Ok(trimmed.parse().unwrap_or(0))
+            // Fallback: try reading as text (for compatibility)
+            let ver_str = String::from_utf8_lossy(&data);
+            let trimmed = ver_str.trim();
+            if trimmed.starts_with("0x") || trimmed.starts_with("0X") {
+                Ok(u32::from_str_radix(&trimmed[2..], 16).unwrap_or(0))
+            } else {
+                Ok(trimmed.parse().unwrap_or(0))
+            }
         }
     }
 

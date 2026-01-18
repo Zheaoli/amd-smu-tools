@@ -102,47 +102,112 @@ impl Default for PmTable {
     }
 }
 
-/// PM table offsets for version 0x240903 (Matisse/Vermeer)
-/// Calculated from pm_table_0x240903 struct in monitor_cpu.c
+/// PM table offset definitions for different processor generations
 mod offsets {
-    // Limits and values (fields 1-12)
-    pub const PPT_LIMIT: usize = 0x000;      // field 1
-    pub const PPT_VALUE: usize = 0x004;      // field 2
-    pub const TDC_LIMIT: usize = 0x008;      // field 3
-    pub const TDC_VALUE: usize = 0x00C;      // field 4
-    pub const THM_LIMIT: usize = 0x010;      // field 5
-    pub const THM_VALUE: usize = 0x014;      // field 6 - Tctl/junction temp
-    pub const EDC_LIMIT: usize = 0x020;      // field 9
-    pub const EDC_VALUE: usize = 0x024;      // field 10
+    /// Offset structure for PM table fields
+    #[derive(Debug, Clone, Copy)]
+    pub struct PmTableOffsets {
+        pub ppt_limit: usize,
+        pub ppt_value: usize,
+        pub tdc_limit: usize,
+        pub tdc_value: usize,
+        pub thm_limit: usize,
+        pub thm_value: usize,     // Tctl/junction temp
+        pub edc_limit: usize,
+        pub edc_value: usize,
+        pub cpu_power: usize,     // Package/CPU power
+        pub soc_power: usize,
+        pub cpu_voltage: usize,
+        pub soc_voltage: usize,
+        pub fclk: usize,
+        pub mclk: usize,
+        pub soc_temp: usize,
+        pub core_power_base: usize,
+        pub core_temp_base: usize,
+        pub core_freq_base: usize,
+        pub core_freqeff_base: usize,
+        pub core_c0_base: usize,
+        pub max_cores: usize,
+    }
 
-    // Power (fields 25-26)
-    pub const VDDCR_CPU_POWER: usize = 0x060; // field 25
-    pub const VDDCR_SOC_POWER: usize = 0x064; // field 26
+    /// PM table offsets for version 0x240903 (Matisse/Vermeer - Zen 2/3)
+    pub const OFFSETS_0X240903: PmTableOffsets = PmTableOffsets {
+        ppt_limit: 0x000,
+        ppt_value: 0x004,
+        tdc_limit: 0x008,
+        tdc_value: 0x00C,
+        thm_limit: 0x010,
+        thm_value: 0x014,
+        edc_limit: 0x020,
+        edc_value: 0x024,
+        cpu_power: 0x060,
+        soc_power: 0x064,
+        cpu_voltage: 0x0A0,
+        soc_voltage: 0x0B4,
+        fclk: 0x0C0,
+        mclk: 0x0CC,
+        soc_temp: 0x1CC,
+        core_power_base: 0x24C,
+        core_temp_base: 0x28C,
+        core_freq_base: 0x2EC,
+        core_freqeff_base: 0x30C,
+        core_c0_base: 0x32C,
+        max_cores: 16,
+    };
 
-    // Telemetry (fields 41-48)
-    pub const CPU_VOLTAGE: usize = 0x0A0;     // field 41 - CPU_TELEMETRY_VOLTAGE
-    pub const SOC_VOLTAGE: usize = 0x0B4;     // field 46 - SOC_TELEMETRY_VOLTAGE
+    /// PM table offsets for version 0x00620205 (Granite Ridge - Zen 5)
+    /// Reverse-engineered from actual PM table data
+    pub const OFFSETS_0X620205: PmTableOffsets = PmTableOffsets {
+        ppt_limit: 0x020,
+        ppt_value: 0x024,
+        tdc_limit: 0x028,
+        tdc_value: 0x02C,
+        thm_limit: 0x008,         // 200°C in data
+        thm_value: 0x00C,         // Tctl junction temp
+        edc_limit: 0x0FC,         // 225A
+        edc_value: 0x100,
+        cpu_power: 0x050,         // ~33W observed
+        soc_power: 0x054,         // ~16W observed
+        cpu_voltage: 0x048,       // ~1.38V
+        soc_voltage: 0x04C,       // ~1.34V
+        fclk: 0x11C,              // 2000 MHz
+        mclk: 0x12C,              // 2800 MHz
+        soc_temp: 0x0F8,          // ~47°C
+        core_power_base: 0x57C,   // Per-core power
+        core_temp_base: 0x534,    // Per-core temps (32-38°C idle)
+        core_freq_base: 0x350,    // Only one freq found at 0x350
+        core_freqeff_base: 0x350, // Same as core_freq for now
+        core_c0_base: 0x400,      // Approximate
+        max_cores: 16,
+    };
 
-    // Clocks (fields 49-52)
-    pub const FCLK: usize = 0x0C0;            // field 49 - FCLK_FREQ
-    pub const MCLK: usize = 0x0CC;            // field 52 - MEMCLK_FREQ
-
-    // SOC temperature (field 116)
-    pub const SOC_TEMP: usize = 0x1CC;        // field 116 - SOC_TEMP
-
-    // Per-core arrays (8 elements each)
-    pub const CORE_POWER_BASE: usize = 0x24C; // field 148 - CORE_POWER[0]
-    pub const CORE_TEMP_BASE: usize = 0x28C;  // field 164 - CORE_TEMP[0]
-    pub const CORE_FREQ_BASE: usize = 0x2EC;  // field 188 - CORE_FREQ[0]
-    pub const CORE_FREQEFF_BASE: usize = 0x30C; // field 196 - CORE_FREQEFF[0]
-    pub const CORE_C0_BASE: usize = 0x32C;    // field 204 - CORE_C0[0]
+    /// Get the appropriate offsets for a given PM table version
+    pub fn get_offsets(version: u32) -> Option<PmTableOffsets> {
+        match version {
+            0x240903 => Some(OFFSETS_0X240903),
+            0x00620205 => Some(OFFSETS_0X620205),
+            _ => None,
+        }
+    }
 }
 
 impl PmTable {
     /// Parse PM table from raw bytes
     pub fn parse(data: &[u8], version: u32, codename: Codename, core_count: usize) -> Result<Self> {
-        // Minimum size check
-        let min_size = offsets::CORE_C0_BASE + (core_count * 4);
+        // Get offsets for this PM table version
+        let off = offsets::get_offsets(version).ok_or_else(|| {
+            SmuError::UnsupportedPmTableVersion(version)
+        })?;
+
+        // Minimum size check based on the largest per-core offset
+        let max_per_core_base = [
+            off.core_c0_base,
+            off.core_power_base,
+            off.core_temp_base,
+            off.core_freq_base,
+            off.core_freqeff_base,
+        ].into_iter().max().unwrap_or(0);
+        let min_size = max_per_core_base + (core_count * 4);
         if data.len() < min_size {
             return Err(SmuError::InvalidPmTableSize {
                 expected: min_size,
@@ -158,35 +223,43 @@ impl PmTable {
         };
 
         // Parse limits
-        table.ppt_limit = read_f32(data, offsets::PPT_LIMIT)?;
-        table.ppt_value = read_f32(data, offsets::PPT_VALUE)?;
-        table.tdc_limit = read_f32(data, offsets::TDC_LIMIT)?;
-        table.tdc_value = read_f32(data, offsets::TDC_VALUE)?;
-        table.thm_limit = read_f32(data, offsets::THM_LIMIT)?;
-        table.tctl = read_f32(data, offsets::THM_VALUE)?;
-        table.edc_limit = read_f32(data, offsets::EDC_LIMIT)?;
-        table.edc_value = read_f32(data, offsets::EDC_VALUE)?;
+        table.ppt_limit = read_f32(data, off.ppt_limit)?;
+        table.ppt_value = read_f32(data, off.ppt_value)?;
+        table.tdc_limit = read_f32(data, off.tdc_limit)?;
+        table.tdc_value = read_f32(data, off.tdc_value)?;
+        table.thm_limit = read_f32(data, off.thm_limit)?;
+        table.tctl = read_f32(data, off.thm_value)?;
+        table.edc_limit = read_f32(data, off.edc_limit)?;
+        table.edc_value = read_f32(data, off.edc_value)?;
 
         // Parse power
-        table.package_power = read_f32(data, offsets::VDDCR_CPU_POWER)?;
-        table.soc_power = read_f32(data, offsets::VDDCR_SOC_POWER)?;
+        table.package_power = read_f32(data, off.cpu_power)?;
+        table.soc_power = read_f32(data, off.soc_power)?;
 
         // Parse voltages and temps
-        table.core_voltage = read_f32(data, offsets::CPU_VOLTAGE)?;
-        table.soc_temp = read_f32(data, offsets::SOC_TEMP)?;
-        table.soc_voltage = read_f32(data, offsets::SOC_VOLTAGE)?;
+        table.core_voltage = read_f32(data, off.cpu_voltage)?;
+        table.soc_temp = read_f32(data, off.soc_temp)?;
+        table.soc_voltage = read_f32(data, off.soc_voltage)?;
 
         // Parse clocks
-        table.fclk = read_f32(data, offsets::FCLK)?;
-        table.mclk = read_f32(data, offsets::MCLK)?;
+        table.fclk = read_f32(data, off.fclk)?;
+        table.mclk = read_f32(data, off.mclk)?;
 
-        // Parse per-core data
-        for i in 0..core_count {
-            table.core_power.push(read_f32(data, offsets::CORE_POWER_BASE + i * 4)?);
-            table.core_temps.push(read_f32(data, offsets::CORE_TEMP_BASE + i * 4)?);
-            table.core_freqs.push(read_f32(data, offsets::CORE_FREQ_BASE + i * 4)?);
-            table.core_freqs_eff.push(read_f32(data, offsets::CORE_FREQEFF_BASE + i * 4)?);
-            table.core_c0.push(read_f32(data, offsets::CORE_C0_BASE + i * 4)?);
+        // Parse per-core data (limit to actual core count and available data)
+        let actual_cores = core_count.min(off.max_cores);
+        for i in 0..actual_cores {
+            // Safely read per-core data, using 0.0 if offset is out of bounds
+            let power_off = off.core_power_base + i * 4;
+            let temp_off = off.core_temp_base + i * 4;
+            let freq_off = off.core_freq_base + i * 4;
+            let freqeff_off = off.core_freqeff_base + i * 4;
+            let c0_off = off.core_c0_base + i * 4;
+
+            table.core_power.push(read_f32_safe(data, power_off));
+            table.core_temps.push(read_f32_safe(data, temp_off));
+            table.core_freqs.push(read_f32_safe(data, freq_off));
+            table.core_freqs_eff.push(read_f32_safe(data, freqeff_off));
+            table.core_c0.push(read_f32_safe(data, c0_off));
         }
 
         Ok(table)
@@ -195,18 +268,40 @@ impl PmTable {
 
 /// Read a little-endian f32 from buffer at offset
 fn read_f32(data: &[u8], offset: usize) -> Result<f32> {
+    if offset + 4 > data.len() {
+        return Err(SmuError::InvalidPmTableSize {
+            expected: offset + 4,
+            actual: data.len(),
+        });
+    }
     let mut cursor = Cursor::new(&data[offset..offset + 4]);
     Ok(cursor.read_f32::<LittleEndian>()?)
+}
+
+/// Read a little-endian f32 from buffer at offset, returning 0.0 if out of bounds
+fn read_f32_safe(data: &[u8], offset: usize) -> f32 {
+    if offset + 4 > data.len() {
+        return 0.0;
+    }
+    let mut cursor = Cursor::new(&data[offset..offset + 4]);
+    cursor.read_f32::<LittleEndian>().unwrap_or(0.0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn create_test_pm_table(core_count: usize) -> Vec<u8> {
-        // PM table 0x240903 is 0x518 bytes (1304 bytes) = 326 floats
-        // But we need at least up to CORE_C0 array end
-        let size = offsets::CORE_C0_BASE + (core_count * 4) + 4;
+    fn create_test_pm_table(core_count: usize, version: u32) -> Vec<u8> {
+        let off = offsets::get_offsets(version).unwrap();
+        // Calculate size based on the maximum offset we'll use (find max of all per-core bases)
+        let max_base = [
+            off.core_c0_base,
+            off.core_power_base,
+            off.core_temp_base,
+            off.core_freq_base,
+            off.core_freqeff_base,
+        ].into_iter().max().unwrap();
+        let size = max_base + (core_count * 4) + 4;
         let mut data = vec![0u8; size];
 
         // Helper to write f32 at offset
@@ -215,30 +310,30 @@ mod tests {
             data[offset..offset + 4].copy_from_slice(&bytes);
         };
 
-        // Write test values at correct offsets
-        write_f32(&mut data, offsets::PPT_LIMIT, 142.0);
-        write_f32(&mut data, offsets::PPT_VALUE, 89.5);
-        write_f32(&mut data, offsets::TDC_LIMIT, 95.0);
-        write_f32(&mut data, offsets::TDC_VALUE, 62.3);
-        write_f32(&mut data, offsets::THM_LIMIT, 90.0);
-        write_f32(&mut data, offsets::THM_VALUE, 65.2);
-        write_f32(&mut data, offsets::EDC_LIMIT, 140.0);
-        write_f32(&mut data, offsets::EDC_VALUE, 98.7);
-        write_f32(&mut data, offsets::VDDCR_CPU_POWER, 88.5);
-        write_f32(&mut data, offsets::VDDCR_SOC_POWER, 12.4);
-        write_f32(&mut data, offsets::CPU_VOLTAGE, 1.35);
-        write_f32(&mut data, offsets::SOC_VOLTAGE, 1.10);
-        write_f32(&mut data, offsets::FCLK, 1800.0);
-        write_f32(&mut data, offsets::MCLK, 1800.0);
-        write_f32(&mut data, offsets::SOC_TEMP, 42.1);  // Now at correct offset 0x1CC
+        // Write test values at correct offsets for this version
+        write_f32(&mut data, off.ppt_limit, 142.0);
+        write_f32(&mut data, off.ppt_value, 89.5);
+        write_f32(&mut data, off.tdc_limit, 95.0);
+        write_f32(&mut data, off.tdc_value, 62.3);
+        write_f32(&mut data, off.thm_limit, 90.0);
+        write_f32(&mut data, off.thm_value, 65.2);
+        write_f32(&mut data, off.edc_limit, 140.0);
+        write_f32(&mut data, off.edc_value, 98.7);
+        write_f32(&mut data, off.cpu_power, 88.5);
+        write_f32(&mut data, off.soc_power, 12.4);
+        write_f32(&mut data, off.cpu_voltage, 1.35);
+        write_f32(&mut data, off.soc_voltage, 1.10);
+        write_f32(&mut data, off.fclk, 1800.0);
+        write_f32(&mut data, off.mclk, 1800.0);
+        write_f32(&mut data, off.soc_temp, 42.1);
 
         // Write per-core data at correct offsets
         for i in 0..core_count {
-            write_f32(&mut data, offsets::CORE_POWER_BASE + i * 4, 8.0 + i as f32 * 0.5);
-            write_f32(&mut data, offsets::CORE_TEMP_BASE + i * 4, 60.0 + i as f32 * 0.5);
-            write_f32(&mut data, offsets::CORE_FREQ_BASE + i * 4, 4500.0 + i as f32 * 50.0);
-            write_f32(&mut data, offsets::CORE_FREQEFF_BASE + i * 4, 4400.0 + i as f32 * 50.0);
-            write_f32(&mut data, offsets::CORE_C0_BASE + i * 4, 90.0 + i as f32);
+            write_f32(&mut data, off.core_power_base + i * 4, 8.0 + i as f32 * 0.5);
+            write_f32(&mut data, off.core_temp_base + i * 4, 60.0 + i as f32 * 0.5);
+            write_f32(&mut data, off.core_freq_base + i * 4, 4500.0 + i as f32 * 50.0);
+            write_f32(&mut data, off.core_freqeff_base + i * 4, 4400.0 + i as f32 * 50.0);
+            write_f32(&mut data, off.core_c0_base + i * 4, 90.0 + i as f32);
         }
 
         data
@@ -246,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_parse_limits() {
-        let data = create_test_pm_table(8);
+        let data = create_test_pm_table(8, 0x240903);
         let table = PmTable::parse(&data, 0x240903, Codename::Vermeer, 8).unwrap();
 
         assert!((table.ppt_limit - 142.0).abs() < 0.01);
@@ -258,7 +353,7 @@ mod tests {
 
     #[test]
     fn test_parse_temperatures() {
-        let data = create_test_pm_table(8);
+        let data = create_test_pm_table(8, 0x240903);
         let table = PmTable::parse(&data, 0x240903, Codename::Vermeer, 8).unwrap();
 
         assert!((table.tctl - 65.2).abs() < 0.01);
@@ -270,7 +365,7 @@ mod tests {
 
     #[test]
     fn test_parse_frequencies() {
-        let data = create_test_pm_table(8);
+        let data = create_test_pm_table(8, 0x240903);
         let table = PmTable::parse(&data, 0x240903, Codename::Vermeer, 8).unwrap();
 
         assert!((table.fclk - 1800.0).abs() < 0.01);
@@ -281,7 +376,7 @@ mod tests {
 
     #[test]
     fn test_parse_power_and_voltage() {
-        let data = create_test_pm_table(8);
+        let data = create_test_pm_table(8, 0x240903);
         let table = PmTable::parse(&data, 0x240903, Codename::Vermeer, 8).unwrap();
 
         assert!((table.package_power - 88.5).abs() < 0.01);
@@ -298,13 +393,31 @@ mod tests {
     }
 
     #[test]
+    fn test_unsupported_version() {
+        let data = vec![0u8; 1000];
+        let result = PmTable::parse(&data, 0x999999, Codename::Vermeer, 8);
+        assert!(matches!(result, Err(SmuError::UnsupportedPmTableVersion(_))));
+    }
+
+    #[test]
     fn test_different_core_counts() {
         for cores in [4, 8, 12, 16] {
-            let data = create_test_pm_table(cores);
+            let data = create_test_pm_table(cores, 0x240903);
             let table = PmTable::parse(&data, 0x240903, Codename::Vermeer, cores).unwrap();
             assert_eq!(table.core_temps.len(), cores);
             assert_eq!(table.core_freqs.len(), cores);
             assert_eq!(table.core_power.len(), cores);
         }
+    }
+
+    #[test]
+    fn test_granite_ridge_offsets() {
+        let data = create_test_pm_table(16, 0x00620205);
+        let table = PmTable::parse(&data, 0x00620205, Codename::GraniteRidge, 16).unwrap();
+
+        assert!((table.ppt_limit - 142.0).abs() < 0.01);
+        assert!((table.tctl - 65.2).abs() < 0.01);
+        assert!((table.soc_temp - 42.1).abs() < 0.01);
+        assert_eq!(table.core_temps.len(), 16);
     }
 }
