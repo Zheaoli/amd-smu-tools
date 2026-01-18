@@ -186,3 +186,112 @@ fn read_f32(data: &[u8], offset: usize) -> Result<f32> {
     let mut cursor = Cursor::new(&data[offset..offset + 4]);
     Ok(cursor.read_f32::<LittleEndian>()?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_pm_table(core_count: usize) -> Vec<u8> {
+        // Create a buffer large enough for all fields
+        let size = offsets::CORE_C0_BASE + (core_count * 4) + 4;
+        let mut data = vec![0u8; size];
+
+        // Helper to write f32 at offset
+        let write_f32 = |data: &mut [u8], offset: usize, value: f32| {
+            let bytes = value.to_le_bytes();
+            data[offset..offset + 4].copy_from_slice(&bytes);
+        };
+
+        // Write test values
+        write_f32(&mut data, offsets::PPT_LIMIT, 142.0);
+        write_f32(&mut data, offsets::PPT_VALUE, 89.5);
+        write_f32(&mut data, offsets::TDC_LIMIT, 95.0);
+        write_f32(&mut data, offsets::TDC_VALUE, 62.3);
+        write_f32(&mut data, offsets::THM_LIMIT, 90.0);
+        write_f32(&mut data, offsets::THM_VALUE, 65.2);
+        write_f32(&mut data, offsets::EDC_LIMIT, 140.0);
+        write_f32(&mut data, offsets::EDC_VALUE, 98.7);
+        write_f32(&mut data, offsets::VDDCR_CPU_POWER, 88.5);
+        write_f32(&mut data, offsets::VDDCR_SOC_POWER, 12.4);
+        write_f32(&mut data, offsets::CPU_VOLTAGE, 1.35);
+        write_f32(&mut data, offsets::SOC_TEMP, 42.1);
+        write_f32(&mut data, offsets::SOC_VOLTAGE, 1.10);
+        write_f32(&mut data, offsets::FCLK, 1800.0);
+        write_f32(&mut data, offsets::MCLK, 1800.0);
+
+        // Write per-core data
+        for i in 0..core_count {
+            write_f32(&mut data, offsets::CORE_POWER_BASE + i * 4, 8.0 + i as f32 * 0.5);
+            write_f32(&mut data, offsets::CORE_TEMP_BASE + i * 4, 60.0 + i as f32 * 0.5);
+            write_f32(&mut data, offsets::CORE_FREQ_BASE + i * 4, 4500.0 + i as f32 * 50.0);
+            write_f32(&mut data, offsets::CORE_FREQEFF_BASE + i * 4, 4400.0 + i as f32 * 50.0);
+            write_f32(&mut data, offsets::CORE_C0_BASE + i * 4, 90.0 + i as f32);
+        }
+
+        data
+    }
+
+    #[test]
+    fn test_parse_limits() {
+        let data = create_test_pm_table(8);
+        let table = PmTable::parse(&data, 0x240903, Codename::Vermeer, 8).unwrap();
+
+        assert!((table.ppt_limit - 142.0).abs() < 0.01);
+        assert!((table.ppt_value - 89.5).abs() < 0.01);
+        assert!((table.tdc_limit - 95.0).abs() < 0.01);
+        assert!((table.edc_limit - 140.0).abs() < 0.01);
+        assert!((table.thm_limit - 90.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_temperatures() {
+        let data = create_test_pm_table(8);
+        let table = PmTable::parse(&data, 0x240903, Codename::Vermeer, 8).unwrap();
+
+        assert!((table.tctl - 65.2).abs() < 0.01);
+        assert!((table.soc_temp - 42.1).abs() < 0.01);
+        assert_eq!(table.core_temps.len(), 8);
+        assert!((table.core_temps[0] - 60.0).abs() < 0.01);
+        assert!((table.core_temps[7] - 63.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_frequencies() {
+        let data = create_test_pm_table(8);
+        let table = PmTable::parse(&data, 0x240903, Codename::Vermeer, 8).unwrap();
+
+        assert!((table.fclk - 1800.0).abs() < 0.01);
+        assert!((table.mclk - 1800.0).abs() < 0.01);
+        assert_eq!(table.core_freqs.len(), 8);
+        assert!((table.core_freqs[0] - 4500.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_power_and_voltage() {
+        let data = create_test_pm_table(8);
+        let table = PmTable::parse(&data, 0x240903, Codename::Vermeer, 8).unwrap();
+
+        assert!((table.package_power - 88.5).abs() < 0.01);
+        assert!((table.soc_power - 12.4).abs() < 0.01);
+        assert!((table.core_voltage - 1.35).abs() < 0.01);
+        assert!((table.soc_voltage - 1.10).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_invalid_size() {
+        let data = vec![0u8; 100]; // Too small
+        let result = PmTable::parse(&data, 0x240903, Codename::Vermeer, 8);
+        assert!(matches!(result, Err(SmuError::InvalidPmTableSize { .. })));
+    }
+
+    #[test]
+    fn test_different_core_counts() {
+        for cores in [4, 8, 12, 16] {
+            let data = create_test_pm_table(cores);
+            let table = PmTable::parse(&data, 0x240903, Codename::Vermeer, cores).unwrap();
+            assert_eq!(table.core_temps.len(), cores);
+            assert_eq!(table.core_freqs.len(), cores);
+            assert_eq!(table.core_power.len(), cores);
+        }
+    }
+}
