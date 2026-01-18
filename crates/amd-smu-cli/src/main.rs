@@ -1,4 +1,8 @@
+mod output;
+
+use amd_smu_lib::SmuReader;
 use clap::Parser;
+use output::{format_json, format_text, OutputOptions};
 use std::time::Duration;
 
 #[derive(Parser, Debug)]
@@ -47,6 +51,68 @@ fn main() {
         std::process::exit(1);
     }
 
-    println!("amd-smu-sensors v{}", amd_smu_lib::version());
-    println!("Args: {:?}", args);
+    let reader = match SmuReader::new() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let smu_version = reader.smu_version().unwrap_or_else(|_| "Unknown".to_string());
+    let opts = OutputOptions {
+        temps_only: args.temps,
+        power_only: args.power,
+        freq_only: args.freq,
+    };
+
+    if args.watch {
+        run_watch_mode(&reader, &smu_version, &opts, args.json, args.interval);
+    } else {
+        run_single_shot(&reader, &smu_version, &opts, args.json);
+    }
+}
+
+fn run_single_shot(reader: &SmuReader, smu_version: &str, opts: &OutputOptions, json: bool) {
+    match reader.read_pm_table() {
+        Ok(table) => {
+            if json {
+                println!("{}", format_json(&table));
+            } else {
+                print!("{}", format_text(&table, smu_version, opts));
+            }
+        }
+        Err(e) => {
+            eprintln!("Error reading PM table: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_watch_mode(
+    reader: &SmuReader,
+    smu_version: &str,
+    opts: &OutputOptions,
+    json: bool,
+    interval: Duration,
+) {
+    loop {
+        // Clear screen
+        print!("\x1B[2J\x1B[1;1H");
+
+        match reader.read_pm_table() {
+            Ok(table) => {
+                if json {
+                    println!("{}", format_json(&table));
+                } else {
+                    print!("{}", format_text(&table, smu_version, opts));
+                }
+            }
+            Err(e) => {
+                eprintln!("Error reading PM table: {}", e);
+            }
+        }
+
+        std::thread::sleep(interval);
+    }
 }
