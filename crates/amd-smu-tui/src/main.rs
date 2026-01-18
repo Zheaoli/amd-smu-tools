@@ -1,3 +1,17 @@
+mod app;
+
+use app::App;
+use std::time::Duration;
+
 fn main() {
-    println!("amd-smu-tui v{}", amd_smu_lib::version());
+    let app = match App::new(Duration::from_millis(500)) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    println!("TUI app initialized: {}", app.smu_version);
+    println!("Full TUI implementation coming next...");
 }
