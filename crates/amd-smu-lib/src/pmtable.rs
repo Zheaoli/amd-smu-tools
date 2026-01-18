@@ -174,7 +174,7 @@ mod offsets {
         fclk: 0x11C,              // 2000 MHz
         mclk: 0x12C,              // 2800 MHz
         soc_temp: 0x0F8,          // ~47-49°C
-        core_power_base: 0x574,   // Per-core power (4-6W each)
+        core_power_base: 0x4B4,   // Per-core power (~0.5-2W each, sum ≈ package power)
         core_temp_base: 0x534,    // Per-core temps
         core_freq_base: 0xFFFF,   // Not available in PM table - use 0xFFFF as marker
         core_freqeff_base: 0xFFFF, // Not available in PM table
