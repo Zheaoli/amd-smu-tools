@@ -102,28 +102,40 @@ impl Default for PmTable {
     }
 }
 
-/// PM table offsets for version 0x240903 (Matisse/Vermeer and later)
+/// PM table offsets for version 0x240903 (Matisse/Vermeer)
+/// Calculated from pm_table_0x240903 struct in monitor_cpu.c
 mod offsets {
-    pub const PPT_LIMIT: usize = 0x000;
-    pub const PPT_VALUE: usize = 0x004;
-    pub const TDC_LIMIT: usize = 0x008;
-    pub const TDC_VALUE: usize = 0x00C;
-    pub const THM_LIMIT: usize = 0x010;
-    pub const THM_VALUE: usize = 0x014;
-    pub const EDC_LIMIT: usize = 0x020;
-    pub const EDC_VALUE: usize = 0x024;
-    pub const VDDCR_CPU_POWER: usize = 0x060;
-    pub const VDDCR_SOC_POWER: usize = 0x064;
-    pub const CPU_VOLTAGE: usize = 0x0A0;
-    pub const SOC_TEMP: usize = 0x0A8;
-    pub const SOC_VOLTAGE: usize = 0x0B4;
-    pub const FCLK: usize = 0x0C0;
-    pub const MCLK: usize = 0x0C8;
-    pub const CORE_POWER_BASE: usize = 0x24C;
-    pub const CORE_TEMP_BASE: usize = 0x2C0;
-    pub const CORE_FREQ_BASE: usize = 0x2EC;
-    pub const CORE_FREQEFF_BASE: usize = 0x30C;
-    pub const CORE_C0_BASE: usize = 0x32C;
+    // Limits and values (fields 1-12)
+    pub const PPT_LIMIT: usize = 0x000;      // field 1
+    pub const PPT_VALUE: usize = 0x004;      // field 2
+    pub const TDC_LIMIT: usize = 0x008;      // field 3
+    pub const TDC_VALUE: usize = 0x00C;      // field 4
+    pub const THM_LIMIT: usize = 0x010;      // field 5
+    pub const THM_VALUE: usize = 0x014;      // field 6 - Tctl/junction temp
+    pub const EDC_LIMIT: usize = 0x020;      // field 9
+    pub const EDC_VALUE: usize = 0x024;      // field 10
+
+    // Power (fields 25-26)
+    pub const VDDCR_CPU_POWER: usize = 0x060; // field 25
+    pub const VDDCR_SOC_POWER: usize = 0x064; // field 26
+
+    // Telemetry (fields 41-48)
+    pub const CPU_VOLTAGE: usize = 0x0A0;     // field 41 - CPU_TELEMETRY_VOLTAGE
+    pub const SOC_VOLTAGE: usize = 0x0B4;     // field 46 - SOC_TELEMETRY_VOLTAGE
+
+    // Clocks (fields 49-52)
+    pub const FCLK: usize = 0x0C0;            // field 49 - FCLK_FREQ
+    pub const MCLK: usize = 0x0CC;            // field 52 - MEMCLK_FREQ
+
+    // SOC temperature (field 116)
+    pub const SOC_TEMP: usize = 0x1CC;        // field 116 - SOC_TEMP
+
+    // Per-core arrays (8 elements each)
+    pub const CORE_POWER_BASE: usize = 0x24C; // field 148 - CORE_POWER[0]
+    pub const CORE_TEMP_BASE: usize = 0x28C;  // field 164 - CORE_TEMP[0]
+    pub const CORE_FREQ_BASE: usize = 0x2EC;  // field 188 - CORE_FREQ[0]
+    pub const CORE_FREQEFF_BASE: usize = 0x30C; // field 196 - CORE_FREQEFF[0]
+    pub const CORE_C0_BASE: usize = 0x32C;    // field 204 - CORE_C0[0]
 }
 
 impl PmTable {
@@ -192,7 +204,8 @@ mod tests {
     use super::*;
 
     fn create_test_pm_table(core_count: usize) -> Vec<u8> {
-        // Create a buffer large enough for all fields
+        // PM table 0x240903 is 0x518 bytes (1304 bytes) = 326 floats
+        // But we need at least up to CORE_C0 array end
         let size = offsets::CORE_C0_BASE + (core_count * 4) + 4;
         let mut data = vec![0u8; size];
 
@@ -202,7 +215,7 @@ mod tests {
             data[offset..offset + 4].copy_from_slice(&bytes);
         };
 
-        // Write test values
+        // Write test values at correct offsets
         write_f32(&mut data, offsets::PPT_LIMIT, 142.0);
         write_f32(&mut data, offsets::PPT_VALUE, 89.5);
         write_f32(&mut data, offsets::TDC_LIMIT, 95.0);
@@ -214,12 +227,12 @@ mod tests {
         write_f32(&mut data, offsets::VDDCR_CPU_POWER, 88.5);
         write_f32(&mut data, offsets::VDDCR_SOC_POWER, 12.4);
         write_f32(&mut data, offsets::CPU_VOLTAGE, 1.35);
-        write_f32(&mut data, offsets::SOC_TEMP, 42.1);
         write_f32(&mut data, offsets::SOC_VOLTAGE, 1.10);
         write_f32(&mut data, offsets::FCLK, 1800.0);
         write_f32(&mut data, offsets::MCLK, 1800.0);
+        write_f32(&mut data, offsets::SOC_TEMP, 42.1);  // Now at correct offset 0x1CC
 
-        // Write per-core data
+        // Write per-core data at correct offsets
         for i in 0..core_count {
             write_f32(&mut data, offsets::CORE_POWER_BASE + i * 4, 8.0 + i as f32 * 0.5);
             write_f32(&mut data, offsets::CORE_TEMP_BASE + i * 4, 60.0 + i as f32 * 0.5);

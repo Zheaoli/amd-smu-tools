@@ -30,7 +30,7 @@ fn create_mock_pm_table() -> Vec<u8> {
         data[offset..offset + 4].copy_from_slice(&bytes);
     };
 
-    // Limits and values
+    // Limits and values (correct offsets from pm_table_0x240903 struct)
     write_f32(&mut data, 0x000, 142.0);  // PPT_LIMIT
     write_f32(&mut data, 0x004, 89.5);   // PPT_VALUE
     write_f32(&mut data, 0x008, 95.0);   // TDC_LIMIT
@@ -39,18 +39,18 @@ fn create_mock_pm_table() -> Vec<u8> {
     write_f32(&mut data, 0x014, 65.2);   // THM_VALUE (Tctl)
     write_f32(&mut data, 0x020, 140.0);  // EDC_LIMIT
     write_f32(&mut data, 0x024, 98.7);   // EDC_VALUE
-    write_f32(&mut data, 0x060, 88.5);   // CPU_POWER
-    write_f32(&mut data, 0x064, 12.4);   // SOC_POWER
-    write_f32(&mut data, 0x0A0, 1.35);   // CPU_VOLTAGE
-    write_f32(&mut data, 0x0A8, 42.1);   // SOC_TEMP
-    write_f32(&mut data, 0x0B4, 1.10);   // SOC_VOLTAGE
-    write_f32(&mut data, 0x0C0, 1800.0); // FCLK
-    write_f32(&mut data, 0x0C8, 1800.0); // MCLK
+    write_f32(&mut data, 0x060, 88.5);   // VDDCR_CPU_POWER
+    write_f32(&mut data, 0x064, 12.4);   // VDDCR_SOC_POWER
+    write_f32(&mut data, 0x0A0, 1.35);   // CPU_TELEMETRY_VOLTAGE
+    write_f32(&mut data, 0x0B4, 1.10);   // SOC_TELEMETRY_VOLTAGE
+    write_f32(&mut data, 0x0C0, 1800.0); // FCLK_FREQ
+    write_f32(&mut data, 0x0CC, 1800.0); // MEMCLK_FREQ (was 0x0C8, now correct)
+    write_f32(&mut data, 0x1CC, 42.1);   // SOC_TEMP (was 0x0A8, now correct)
 
-    // Per-core data (8 cores)
+    // Per-core data (8 cores) - correct offsets
     for i in 0..8 {
         write_f32(&mut data, 0x24C + i * 4, 8.0 + i as f32 * 0.5);   // CORE_POWER
-        write_f32(&mut data, 0x2C0 + i * 4, 60.0 + i as f32 * 0.5);  // CORE_TEMP
+        write_f32(&mut data, 0x28C + i * 4, 60.0 + i as f32 * 0.5);  // CORE_TEMP (was 0x2C0)
         write_f32(&mut data, 0x2EC + i * 4, 4500.0 + i as f32 * 50.0); // CORE_FREQ
         write_f32(&mut data, 0x30C + i * 4, 4400.0 + i as f32 * 50.0); // CORE_FREQEFF
         write_f32(&mut data, 0x32C + i * 4, 90.0 + i as f32);        // CORE_C0
