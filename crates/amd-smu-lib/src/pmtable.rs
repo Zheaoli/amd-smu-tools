@@ -156,28 +156,29 @@ mod offsets {
     };
 
     /// PM table offsets for version 0x00620205 (Granite Ridge - Zen 5)
-    /// Reverse-engineered from actual PM table data
+    /// Reverse-engineered from actual PM table data on 9950X3D
+    /// Note: Per-core frequencies not available in PM table, use /proc/cpuinfo instead
     pub const OFFSETS_0X620205: PmTableOffsets = PmTableOffsets {
-        ppt_limit: 0x020,
-        ppt_value: 0x024,
-        tdc_limit: 0x028,
-        tdc_value: 0x02C,
-        thm_limit: 0x008,         // 200°C in data
+        ppt_limit: 0x020,         // 160W
+        ppt_value: 0x024,         // Current package power
+        tdc_limit: 0x028,         // 95A
+        tdc_value: 0x02C,         // Current TDC
+        thm_limit: 0x008,         // 200°C thermal limit
         thm_value: 0x00C,         // Tctl junction temp
         edc_limit: 0x0FC,         // 225A
-        edc_value: 0x100,
-        cpu_power: 0x050,         // ~33W observed
-        soc_power: 0x054,         // ~16W observed
-        cpu_voltage: 0x048,       // ~1.38V
-        soc_voltage: 0x04C,       // ~1.34V
+        edc_value: 0x100,         // Current EDC
+        cpu_power: 0x024,         // Same as ppt_value (package power)
+        soc_power: 0x054,         // SoC power ~18W
+        cpu_voltage: 0x048,       // ~1.36V
+        soc_voltage: 0x04C,       // ~1.22V
         fclk: 0x11C,              // 2000 MHz
         mclk: 0x12C,              // 2800 MHz
-        soc_temp: 0x0F8,          // ~47°C
-        core_power_base: 0x57C,   // Per-core power
-        core_temp_base: 0x534,    // Per-core temps (32-38°C idle)
-        core_freq_base: 0x350,    // Only one freq found at 0x350
-        core_freqeff_base: 0x350, // Same as core_freq for now
-        core_c0_base: 0x400,      // Approximate
+        soc_temp: 0x0F8,          // ~47-49°C
+        core_power_base: 0x574,   // Per-core power (4-6W each)
+        core_temp_base: 0x534,    // Per-core temps
+        core_freq_base: 0xFFFF,   // Not available in PM table - use 0xFFFF as marker
+        core_freqeff_base: 0xFFFF, // Not available in PM table
+        core_c0_base: 0xFFFF,     // Not available in PM table
         max_cores: 16,
     };
 
@@ -199,14 +200,17 @@ impl PmTable {
             SmuError::UnsupportedPmTableVersion(version)
         })?;
 
-        // Minimum size check based on the largest per-core offset
+        // Minimum size check based on the largest per-core offset (excluding 0xFFFF markers)
         let max_per_core_base = [
             off.core_c0_base,
             off.core_power_base,
             off.core_temp_base,
             off.core_freq_base,
             off.core_freqeff_base,
-        ].into_iter().max().unwrap_or(0);
+        ].into_iter()
+            .filter(|&x| x < 0xFFFF)  // Exclude marker values
+            .max()
+            .unwrap_or(0);
         let min_size = max_per_core_base + (core_count * 4);
         if data.len() < min_size {
             return Err(SmuError::InvalidPmTableSize {
@@ -248,18 +252,33 @@ impl PmTable {
         // Parse per-core data (limit to actual core count and available data)
         let actual_cores = core_count.min(off.max_cores);
         for i in 0..actual_cores {
-            // Safely read per-core data, using 0.0 if offset is out of bounds
+            // Safely read per-core data, using 0.0 if offset is 0xFFFF (not available) or out of bounds
             let power_off = off.core_power_base + i * 4;
             let temp_off = off.core_temp_base + i * 4;
-            let freq_off = off.core_freq_base + i * 4;
-            let freqeff_off = off.core_freqeff_base + i * 4;
-            let c0_off = off.core_c0_base + i * 4;
 
-            table.core_power.push(read_f32_safe(data, power_off));
-            table.core_temps.push(read_f32_safe(data, temp_off));
-            table.core_freqs.push(read_f32_safe(data, freq_off));
-            table.core_freqs_eff.push(read_f32_safe(data, freqeff_off));
-            table.core_c0.push(read_f32_safe(data, c0_off));
+            table.core_power.push(read_f32_safe_with_marker(data, power_off));
+            table.core_temps.push(read_f32_safe_with_marker(data, temp_off));
+
+            // For frequency and C0, check if offset is marked as unavailable (0xFFFF)
+            if off.core_freq_base != 0xFFFF {
+                let freq_off = off.core_freq_base + i * 4;
+                let freqeff_off = off.core_freqeff_base + i * 4;
+                table.core_freqs.push(read_f32_safe_with_marker(data, freq_off));
+                table.core_freqs_eff.push(read_f32_safe_with_marker(data, freqeff_off));
+            }
+
+            if off.core_c0_base != 0xFFFF {
+                let c0_off = off.core_c0_base + i * 4;
+                table.core_c0.push(read_f32_safe_with_marker(data, c0_off));
+            }
+        }
+
+        // If frequencies are not in PM table, try to read from /proc/cpuinfo
+        if off.core_freq_base == 0xFFFF {
+            if let Ok(freqs) = read_cpuinfo_frequencies(actual_cores) {
+                table.core_freqs = freqs.clone();
+                table.core_freqs_eff = freqs;
+            }
         }
 
         Ok(table)
@@ -278,13 +297,41 @@ fn read_f32(data: &[u8], offset: usize) -> Result<f32> {
     Ok(cursor.read_f32::<LittleEndian>()?)
 }
 
-/// Read a little-endian f32 from buffer at offset, returning 0.0 if out of bounds
-fn read_f32_safe(data: &[u8], offset: usize) -> f32 {
-    if offset + 4 > data.len() {
+/// Read a little-endian f32, returning 0.0 if offset is marker (0xFFFF) or out of bounds
+fn read_f32_safe_with_marker(data: &[u8], offset: usize) -> f32 {
+    if offset >= 0xFFFF || offset + 4 > data.len() {
         return 0.0;
     }
     let mut cursor = Cursor::new(&data[offset..offset + 4]);
     cursor.read_f32::<LittleEndian>().unwrap_or(0.0)
+}
+
+/// Read CPU frequencies from /proc/cpuinfo
+fn read_cpuinfo_frequencies(core_count: usize) -> std::io::Result<Vec<f32>> {
+    use std::fs;
+
+    let cpuinfo = fs::read_to_string("/proc/cpuinfo")?;
+    let mut freqs = Vec::with_capacity(core_count);
+
+    for line in cpuinfo.lines() {
+        if line.starts_with("cpu MHz") {
+            if let Some(value_str) = line.split(':').nth(1) {
+                if let Ok(freq) = value_str.trim().parse::<f32>() {
+                    freqs.push(freq);
+                    if freqs.len() >= core_count {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Pad with zeros if we didn't get enough values
+    while freqs.len() < core_count {
+        freqs.push(0.0);
+    }
+
+    Ok(freqs)
 }
 
 #[cfg(test)]
@@ -293,14 +340,17 @@ mod tests {
 
     fn create_test_pm_table(core_count: usize, version: u32) -> Vec<u8> {
         let off = offsets::get_offsets(version).unwrap();
-        // Calculate size based on the maximum offset we'll use (find max of all per-core bases)
+        // Calculate size based on the maximum offset we'll use (find max of all per-core bases, excluding 0xFFFF markers)
         let max_base = [
             off.core_c0_base,
             off.core_power_base,
             off.core_temp_base,
             off.core_freq_base,
             off.core_freqeff_base,
-        ].into_iter().max().unwrap();
+        ].into_iter()
+            .filter(|&x| x < 0xFFFF)
+            .max()
+            .unwrap_or(0);
         let size = max_base + (core_count * 4) + 4;
         let mut data = vec![0u8; size];
 
@@ -327,13 +377,23 @@ mod tests {
         write_f32(&mut data, off.mclk, 1800.0);
         write_f32(&mut data, off.soc_temp, 42.1);
 
-        // Write per-core data at correct offsets
+        // Write per-core data at correct offsets (skip 0xFFFF marker offsets)
         for i in 0..core_count {
-            write_f32(&mut data, off.core_power_base + i * 4, 8.0 + i as f32 * 0.5);
-            write_f32(&mut data, off.core_temp_base + i * 4, 60.0 + i as f32 * 0.5);
-            write_f32(&mut data, off.core_freq_base + i * 4, 4500.0 + i as f32 * 50.0);
-            write_f32(&mut data, off.core_freqeff_base + i * 4, 4400.0 + i as f32 * 50.0);
-            write_f32(&mut data, off.core_c0_base + i * 4, 90.0 + i as f32);
+            if off.core_power_base < 0xFFFF {
+                write_f32(&mut data, off.core_power_base + i * 4, 8.0 + i as f32 * 0.5);
+            }
+            if off.core_temp_base < 0xFFFF {
+                write_f32(&mut data, off.core_temp_base + i * 4, 60.0 + i as f32 * 0.5);
+            }
+            if off.core_freq_base < 0xFFFF {
+                write_f32(&mut data, off.core_freq_base + i * 4, 4500.0 + i as f32 * 50.0);
+            }
+            if off.core_freqeff_base < 0xFFFF {
+                write_f32(&mut data, off.core_freqeff_base + i * 4, 4400.0 + i as f32 * 50.0);
+            }
+            if off.core_c0_base < 0xFFFF {
+                write_f32(&mut data, off.core_c0_base + i * 4, 90.0 + i as f32);
+            }
         }
 
         data
