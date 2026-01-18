@@ -7,3 +7,4 @@ license.workspace = true
 [dependencies]
 thiserror = { workspace = true }
 byteorder = { workspace = true }
+serde = { workspace = true }
