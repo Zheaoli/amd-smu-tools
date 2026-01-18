@@ -1,0 +1,16 @@
+[package]
+name = "amd-smu-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "amd-smu-sensors"
+path = "src/main.rs"
+
+[dependencies]
+amd-smu-lib = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+humantime = { workspace = true }
